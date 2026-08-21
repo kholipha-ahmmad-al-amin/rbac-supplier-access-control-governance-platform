@@ -1,0 +1,12 @@
+import express from 'express'; import { createRbacRegistry, RbacError } from './domain.mjs';
+const registry = createRbacRegistry(); const app = express(); app.use(express.json()); const actor = request => ({ id: request.header('x-actor-id') || 'anonymous', role: request.header('x-role') || 'anonymous' });
+const handle = (response, work) => { try { response.json(work()); } catch (error) { const status = error instanceof RbacError ? ({ VALIDATION: 400, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409 }[error.code] || 500) : 500; response.status(status).json({ error: error.code || 'INTERNAL_ERROR', message: error.message }); } };
+app.get('/health', (_, response) => response.json({ status: 'ok', service: 'rbac-supplier-access-control-governance', roles: registry.count() }));
+app.post('/roles', (request, response) => handle(response, () => registry.defineRole(actor(request), request.body)));
+app.post('/grants', (request, response) => handle(response, () => registry.requestGrant(actor(request), request.body)));
+app.post('/grants/:id/approve', (request, response) => handle(response, () => registry.approveGrant(actor(request), request.params.id)));
+app.post('/authorize', (request, response) => handle(response, () => registry.authorize(actor(request), request.body)));
+app.post('/grants/:id/revoke', (request, response) => handle(response, () => registry.revokeGrant(actor(request), request.params.id, request.body.reason)));
+app.get('/roles/:id', (request, response) => handle(response, () => registry.getRole(request.params.id)));
+app.get('/audit-events', (_, response) => response.json({ events: registry.audit() }));
+app.listen(Number(process.env.RBAC_PORT || 26300), '0.0.0.0', () => console.log('supplier RBAC governance service ready'));
